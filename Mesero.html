@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Mesero - Pedidos + Bandeja</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 20px; background-color: #f4f4f4; }
+    h2 { text-align: center; }
+    .mesas { display: flex; flex-wrap: wrap; justify-content: center; gap: 15px; }
+    .mesa {
+      background-color: #4CAF50;
+      border: 2px solid #333;
+      border-radius: 10px;
+      width: 100px; height: 100px;
+      display: flex; justify-content: center; align-items: center;
+      cursor: pointer;
+      font-weight: bold; font-size: 20px; color: white;
+    }
+    .mesa.ocupada { background-color: #D32F2F; }
+    .modal {
+      display: none; position: fixed; top: 0; left: 0;
+      width: 100%; height: 100%;
+      background-color: rgba(0,0,0,0.5);
+      justify-content: center; align-items: center;
+    }
+    .modal-content {
+      background-color: #fff;
+      padding: 20px;
+      border-radius: 10px;
+      width: 95%;
+      max-width: 1200px;
+      display: flex;
+      gap: 20px;
+      position: relative;
+    }
+    .categorias, .productos, .resumen, .historial { flex: 1; overflow-y: auto; max-height: 75vh; }
+    .boton {
+      background-color: #007bff; color: white; border: none;
+      padding: 10px; margin: 5px 0;
+      border-radius: 5px; width: 100%;
+      cursor: pointer;
+    }
+    .producto-item {
+      display: flex; align-items: center; gap: 10px;
+      margin-bottom: 8px;
+    }
+    .producto-item span { min-width: 150px; }
+    .pedido-linea {
+      display: flex; justify-content: space-between;
+      padding: 4px 0;
+    }
+    .close-btn {
+      position: absolute; top: 10px; right: 10px;
+      background: crimson; color: white;
+      padding: 5px 10px;
+      border: none; border-radius: 6px;
+      cursor: pointer;
+    }
+    .bandeja-icono {
+      position: fixed; top: 20px; right: 20px;
+      background: #ff9800; color: white;
+      border-radius: 50%; width: 50px; height: 50px;
+      display: flex; justify-content: center; align-items: center;
+      font-size: 24px; font-weight: bold;
+      cursor: pointer;
+      z-index: 10;
+    }
+    #notificacionesPanel {
+      display: none;
+      position: fixed; top: 80px; right: 20px;
+      width: 300px; max-height: 80vh;
+      overflow-y: auto;
+      background: white; padding: 10px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.2);
+    }
+    .grupo-mesa { margin-bottom: 10px; border: 1px solid #ccc; border-radius: 5px; }
+    .grupo-mesa summary {
+      background: #f6f6f6; padding: 5px 10px; font-weight: bold; cursor: pointer;
+    }
+    .notif {
+      background: #fffde7; padding: 6px 8px; border-bottom: 1px solid #eee; font-size: 14px;
+    }
+    .historial-item {
+      background: #f9f9f9; padding: 4px; margin-bottom: 4px;
+      border-left: 4px solid #2196F3;
+    }
+  </style>
+</head>
+<body>
+  <h2>Selecciona una Mesa</h2>
+  <div class="mesas" id="mesasContainer"></div>
+
+  <div class="bandeja-icono" onclick="toggleBandeja()">🔔</div>
+  <div id="notificacionesPanel"><h4>Notificaciones</h4><div id="grupoMesas"></div></div>
+
+  <div class="modal" id="modalCategorias">
+    <div class="modal-content">
+      <button class="close-btn" onclick="cerrarModal()">X</button>
+      <div class="categorias">
+        <h3>Categorías</h3>
+        <button class="boton" onclick="mostrarProductos(1)">Comida</button>
+        <button class="boton" onclick="mostrarProductos(3)">Bebida</button>
+        <button class="boton" onclick="mostrarProductos(2)">Trago</button>
+        <button class="boton" onclick="mostrarProductos(4)">Postre</button>
+      </div>
+      <div class="productos">
+        <h3>Productos</h3>
+        <div id="listaProductos"></div>
+      </div>
+      <div class="resumen">
+        <h3>Nuevo Pedido</h3>
+        <div id="resumenPedido"></div>
+        <button class="boton" onclick="enviarPedido()">Enviar Pedido</button>
+      </div>
+      <div class="historial">
+        <h3>Historial Mesa</h3>
+        <div id="historialPedidos"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script>
+    const token = localStorage.getItem("token");
+    const mesasContainer = document.getElementById("mesasContainer");
+    const modal = document.getElementById("modalCategorias");
+    const listaProductos = document.getElementById("listaProductos");
+    const resumenPedido = document.getElementById("resumenPedido");
+    const grupoMesas = document.getElementById("grupoMesas");
+    const panel = document.getElementById("notificacionesPanel");
+    const historialPedidos = document.getElementById("historialPedidos");
+
+    let productosDisponibles = [];
+    let pedido = { mesaId: null, productos: [] };
+    const historialPorMesa = {};
+
+    for (let i = 1; i <= 12; i++) {
+      const div = document.createElement("div");
+      div.className = "mesa";
+      div.id = "mesa-" + i;
+      div.innerText = i;
+      div.onclick = () => abrirModal(i);
+      mesasContainer.appendChild(div);
+    }
+
+    fetch("https://ms-pedidos-b7dsdjcbabgrfda4.brazilsouth-01.azurewebsites.net/api/productos", {
+      headers: { "Authorization": "Bearer " + token }
+    })
+    .then(res => res.json())
+    .then(data => productosDisponibles = data);
+
+    function abrirModal(mesaId) {
+      pedido = { mesaId, productos: [] };
+      modal.style.display = "flex";
+      mostrarProductos(1);
+      actualizarResumen();
+      renderHistorial(mesaId);
+    }
+
+    function cerrarModal() {
+      modal.style.display = "none";
+    }
+
+    function mostrarProductos(tipo) {
+      listaProductos.innerHTML = "";
+      productosDisponibles.filter(p => p.tipoProducto === tipo).forEach(p => {
+        const cantidad = obtenerCantidadProducto(p.id);
+        const div = document.createElement("div");
+        div.className = "producto-item";
+        div.innerHTML = `
+          <span>${p.nombre} (S/.${p.precio})</span>
+          <button onclick="ajustarCantidad(${p.id}, 1)">+</button>
+          <button onclick="ajustarCantidad(${p.id}, -1)">-</button>
+          <span id="cantidad-${p.id}">${cantidad}</span>
+        `;
+        listaProductos.appendChild(div);
+      });
+    }
+
+    function obtenerCantidadProducto(productoId) {
+      const found = pedido.productos.find(p => p.productoId === productoId);
+      return found ? found.cantidad : 0;
+    }
+
+    function ajustarCantidad(id, delta) {
+      let item = pedido.productos.find(p => p.productoId === id);
+      if (!item && delta > 0) {
+        const prod = productosDisponibles.find(p => p.id === id);
+        pedido.productos.push({ productoId: id, cantidad: delta, precioUnitario: prod.precio, nombre: prod.nombre });
+      } else if (item) {
+        item.cantidad += delta;
+        if (item.cantidad <= 0) {
+          pedido.productos = pedido.productos.filter(p => p.productoId !== id);
+        }
+      }
+      document.getElementById("cantidad-" + id).textContent = obtenerCantidadProducto(id);
+      actualizarResumen();
+    }
+
+    function actualizarResumen() {
+      resumenPedido.innerHTML = "";
+      pedido.productos.forEach(p => {
+        const linea = document.createElement("div");
+        linea.className = "pedido-linea";
+        linea.innerHTML = `<span>${p.nombre} x${p.cantidad}</span><span>S/.${(p.precioUnitario * p.cantidad).toFixed(2)}</span>`;
+        resumenPedido.appendChild(linea);
+      });
+    }
+
+    function enviarPedido() {
+      if (!pedido.productos.length) return alert("No hay productos.");
+      fetch("https://ms-pedidos-b7dsdjcbabgrfda4.brazilsouth-01.azurewebsites.net/api/pedidos", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(pedido)
+      })
+      .then(res => res.json())
+      .then(data => {
+        alert("Pedido enviado. ID: " + data.id);
+        document.getElementById("mesa-" + pedido.mesaId).classList.add("ocupada");
+        if (!historialPorMesa[pedido.mesaId]) historialPorMesa[pedido.mesaId] = [];
+        pedido.productos.forEach(p => historialPorMesa[pedido.mesaId].push({ ...p, estado: "Registrado" }));
+        renderHistorial(pedido.mesaId);
+        pedido = { mesaId: pedido.mesaId, productos: [] };
+        actualizarResumen();
+      });
+    }
+
+    function renderHistorial(mesaId) {
+      historialPedidos.innerHTML = "";
+      const historial = historialPorMesa[mesaId] || [];
+      historial.forEach(item => {
+        const div = document.createElement("div");
+        div.className = "historial-item";
+        div.innerHTML = `${item.nombre} x${item.cantidad} - <strong>${item.estado}</strong>`;
+        historialPedidos.appendChild(div);
+      });
+    }
+
+    function toggleBandeja() {
+      panel.style.display = panel.style.display === "none" ? "block" : "none";
+    }
+
+    function renderGrupoMesa(mesaId) {
+      let contenedor = document.getElementById("grupo-mesa-" + mesaId);
+      if (!contenedor) {
+        contenedor = document.createElement("details");
+        contenedor.className = "grupo-mesa";
+        contenedor.id = "grupo-mesa-" + mesaId;
+        contenedor.open = true;
+        contenedor.innerHTML = `<summary>Mesa ${mesaId}</summary><div id="notifs-${mesaId}"></div>`;
+        grupoMesas.appendChild(contenedor);
+      }
+      return document.getElementById("notifs-" + mesaId);
+    }
+
+    const socket = io("https://ms-pedidos-b7dsdjcbabgrfda4.brazilsouth-01.azurewebsites.net", { auth: { token } });
+    socket.on("estadoProductoActualizado", (data) => {
+      const msg = `🔔 ${data.nombreProducto} (${data.cantidad}) - <strong>${data.estado}</strong>`;
+      const lista = renderGrupoMesa(data.mesaId);
+      const div = document.createElement("div");
+      div.className = "notif";
+      div.innerHTML = msg;
+      lista.appendChild(div);
+
+      // Actualizar estado en historial local
+      const historial = historialPorMesa[data.mesaId] || [];
+      const item = historial.find(p => p.nombre === data.nombreProducto);
+      if (item) item.estado = data.estado;
+      if (pedido.mesaId === data.mesaId) renderHistorial(data.mesaId);
+    });
+  </script>
+</body>
+</html>

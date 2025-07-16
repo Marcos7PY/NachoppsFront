@@ -1,0 +1,72 @@
+
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Vista Cocina / Bar (Individual)</title>
+  <style>
+    body { font-family: Arial; padding: 20px; background: #f2f2f2; }
+    h2 { text-align: center; }
+    .pedido-box {
+      background: white;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 10px;
+      box-shadow: 0 0 5px rgba(0,0,0,0.1);
+    }
+    .producto-linea {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 5px 0;
+    }
+    .producto-linea span { flex: 1; }
+    .producto-linea button {
+      margin-left: 8px;
+      padding: 4px 8px;
+    }
+  </style>
+</head>
+<body>
+  <h2>Gestión Individual de Productos</h2>
+  <div id="pedidosContainer"></div>
+
+  <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+  <script>
+    const tipoVista = prompt("¿Cocina o Bar? (escribe 'cocina' o 'bar')").toLowerCase() === 'bar' ? 2 : 1;
+    const socket = io("https://ms-pedidos-b7dsdjcbabgrfda4.brazilsouth-01.azurewebsites.net");
+    const pedidosContainer = document.getElementById("pedidosContainer");
+
+    socket.on("pedidoCreado", (pedido) => {
+      pedido.productos
+        .filter(p => p.tipoProducto === tipoVista)
+        .forEach(p => {
+          const div = document.createElement("div");
+          div.className = "pedido-box";
+          div.id = `linea-${p.lineaPedidoId}`;
+
+          div.innerHTML = `
+            <strong>Mesa ${pedido.mesaId}</strong> - Pedido ${pedido.id}
+            <div class="producto-linea">
+              <span>${p.nombre} x${p.cantidad}</span>
+              <button onclick="actualizarEstado(${p.lineaPedidoId}, 'EN PREPARACIÓN')">Preparar</button>
+              <button onclick="actualizarEstado(${p.lineaPedidoId}, 'LISTO')">Listo</button>
+            </div>
+          `;
+          pedidosContainer.appendChild(div);
+        });
+    });
+
+    function actualizarEstado(lineaId, estado) {
+      fetch(`https://ms-pedidos-b7dsdjcbabgrfda4.brazilsouth-01.azurewebsites.net/api/lineas-pedido/${lineaId}/estado`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ estado })
+      }).then(() => {
+        const box = document.getElementById(`linea-${lineaId}`);
+        if (box) box.style.border = estado === "LISTO" ? "2px solid green" : "2px solid orange";
+      });
+    }
+  </script>
+</body>
+</html>
